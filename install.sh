@@ -2,12 +2,14 @@
 # Manifa CLI installer. Downloads the right prebuilt `mani` binary from the latest
 # GitHub Release and installs it. Usage:
 #
-#   curl -fsSL https://raw.githubusercontent.com/raymond-UI/manifa/main/install.sh | sh
+#   curl -fsSL https://beta.manifa.dev/install | sh
 #
 # Override the install dir with MANI_INSTALL_DIR, or a specific version with
-# MANI_VERSION=cli-v0.1.0. No Rust toolchain required.
+# MANI_VERSION=cli-v0.1.1. No Rust toolchain required.
 set -eu
 
+# Public releases repo (the source repo is private/closed; binaries + this script
+# live here so anonymous users can download them).
 REPO="raymond-UI/manifa-cli"
 
 err() { printf 'install: %s\n' "$1" >&2; exit 1; }
@@ -30,8 +32,19 @@ target="${arch_part}-${os_part}"
 # --- resolve the release tag -----------------------------------------------
 tag="${MANI_VERSION:-}"
 if [ -z "$tag" ]; then
-  tag="$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" \
-    | grep '"tag_name"' | head -1 | cut -d'"' -f4)"
+  # Resolve the latest tag from the releases/latest REDIRECT on github.com, NOT
+  # the api.github.com endpoint: the API caps anonymous callers at 60 requests/hr
+  # PER IP, which a shared/NAT'd network (office, CI, café) can exhaust — turning
+  # `curl | sh` into a 403. The web redirect (…/releases/latest →
+  # …/releases/tag/<tag>) has no such limit. Fall back to the API only if the
+  # redirect yields nothing.
+  tag="$(curl -fsSLI -o /dev/null -w '%{url_effective}' \
+      "https://github.com/${REPO}/releases/latest" 2>/dev/null \
+    | sed -n 's#.*/releases/tag/##p' | tr -d '\r')"
+  if [ -z "$tag" ]; then
+    tag="$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" \
+      | grep '"tag_name"' | head -1 | cut -d'"' -f4)"
+  fi
   [ -n "$tag" ] || err "could not find the latest release (set MANI_VERSION to pin one)"
 fi
 
